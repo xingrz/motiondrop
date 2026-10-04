@@ -14,6 +14,7 @@ pub struct Asset {
     pub name: String,
     pub bytes: Arc<Vec<u8>>,
     pub preview: Option<PathBuf>,
+    pub info: Option<crate::media_info::MediaInfo>,
 }
 
 #[derive(Clone, Default)]
@@ -22,6 +23,7 @@ pub struct Session {
     pub video: Option<Asset>,
     pub output: Option<Asset>,
     pub split: bool,
+    pub motion: Option<Asset>,
     pub converted: bool,
     // Keep exports alive even after reset while the application is running.
     pub storage: Vec<Arc<tempfile::TempDir>>,
@@ -43,7 +45,16 @@ fn read(path: &Path) -> Result<Vec<u8>> {
 fn asset(dir: &Path, name: String, bytes: Vec<u8>, preview: Option<PathBuf>) -> Result<Asset> {
     let path = dir.join(&name);
     fs::write(&path, &bytes)?;
+    let info = crate::media_info::probe(&path, &bytes);
+    let preview = if preview.is_none() && info.as_ref().is_some_and(|info| info.duration.is_some())
+    {
+        let thumbnail = dir.join("video-preview.png");
+        crate::media_info::video_thumbnail(&path, &thumbnail).then_some(thumbnail)
+    } else {
+        preview
+    };
     Ok(Asset {
+        info,
         path,
         name,
         bytes: Arc::new(bytes),
@@ -68,7 +79,23 @@ fn thumbnail(bytes: &[u8], dir: &Path) -> Option<PathBuf> {
     Some(path)
 }
 
-pub fn import(mut session: Session, paths: Vec<PathBuf>) -> Result<Session> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DropTarget {
+    Workspace,
+    Photo,
+    Video,
+    Motion,
+}
+
+pub fn import(session: Session, paths: Vec<PathBuf>) -> Result<Session> {
+    import_into(session, paths, DropTarget::Workspace)
+}
+
+pub fn import_into(
+    mut session: Session,
+    paths: Vec<PathBuf>,
+    target: DropTarget,
+) -> Result<Session> {
     ensure!(
         !paths.is_empty() && paths.len() <= 2,
         "Drop one MotionPhoto, or one photo and one video"
@@ -90,7 +117,21 @@ pub fn import(mut session: Session, paths: Vec<PathBuf>) -> Result<Session> {
                     paths.len() == 1,
                     "Drop a MotionPhoto on its own to split it"
                 );
+                if !session.split && target == DropTarget::Photo {
+                    photos.push((stem, parts.photo));
+                    continue;
+                }
+                if !session.split && target == DropTarget::Video {
+                    videos.push((stem, parts.video, parts.mime));
+                    continue;
+                }
                 let preview = thumbnail(&parts.photo, dir.path());
+                session.motion = Some(asset(
+                    dir.path(),
+                    format!("{stem}.jpg"),
+                    bytes,
+                    preview.clone(),
+                )?);
                 let ext = if parts.mime == "video/quicktime" {
                     "mov"
                 } else {
@@ -132,12 +173,8 @@ pub fn import(mut session: Session, paths: Vec<PathBuf>) -> Result<Session> {
         photos.len() <= 1 && videos.len() <= 1,
         "Choose one photo and one video, not two files of the same type"
     );
-    if session.split {
-        session.photo = None;
-        session.video = None;
-        session.converted = false;
-    }
     session.split = false;
+    session.motion = None;
     session.output = None;
     if let Some((name, bytes)) = photos.pop() {
         let preview = thumbnail(&bytes, dir.path());
@@ -181,5 +218,47 @@ pub fn import(mut session: Session, paths: Vec<PathBuf>) -> Result<Session> {
         bail!("No supported files were found");
     }
     session.storage.push(dir);
+    Ok(session)
+}
+
+impl Session {
+    pub fn can_reverse(&self) -> bool {
+        self.split || self.output.is_some() || (self.photo.is_none() && self.video.is_none())
+    }
+}
+
+pub fn reverse(mut session: Session) -> Result<Session> {
+    ensure!(
+        session.can_reverse(),
+        "Add a photo and video before reversing"
+    );
+    if session.split {
+        // Reuse the original container: reversal alone must not rewrite metadata.
+        if let Some(motion) = &session.motion {
+            let dir = Arc::new(tempfile::Builder::new().prefix("motiondrop-").tempdir()?);
+            let stem = Path::new(&motion.name)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy();
+            let stem = stem
+                .trim_start()
+                .strip_suffix(".MP")
+                .unwrap_or(stem.trim_start());
+            session.output = Some(asset(
+                dir.path(),
+                format!("{stem}.MP.jpg"),
+                motion.bytes.as_ref().clone(),
+                motion.preview.clone(),
+            )?);
+            session.storage.push(dir);
+        }
+        session.split = false;
+        return Ok(session);
+    }
+    if let Some(output) = &session.output {
+        let path = output.path.clone();
+        return import(session, vec![path]);
+    }
+    session.split = true;
     Ok(session)
 }

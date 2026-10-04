@@ -169,3 +169,146 @@ fn all_four_input_orders_produce_the_same_output() {
     }
     assert!(results.windows(2).all(|pair| pair[0] == pair[1]));
 }
+
+fn fixture_pair(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let photo = dir.join("photo.jpg");
+    let video = dir.join("video.mp4");
+    fs::write(&photo, PHOTO).unwrap();
+    fs::write(&video, VIDEO).unwrap();
+    (photo, video)
+}
+
+#[test]
+fn reversing_reuses_the_result_and_retains_both_components() {
+    let dir = tempfile::tempdir().unwrap();
+    let (photo, video) = fixture_pair(dir.path());
+    let composed = workspace::import(Default::default(), vec![photo, video]).unwrap();
+    let original = composed.output.as_ref().unwrap().bytes.clone();
+    let split = workspace::reverse(composed).unwrap();
+    assert!(split.split);
+    assert_eq!(split.motion.as_ref().unwrap().bytes, original);
+    let reversed = workspace::reverse(split).unwrap();
+    assert!(!reversed.split);
+    assert_eq!(reversed.output.as_ref().unwrap().bytes, original);
+    assert_eq!(reversed.video.as_ref().unwrap().bytes.as_slice(), VIDEO);
+}
+
+#[test]
+fn replacing_a_split_component_keeps_the_other_component() {
+    let dir = tempfile::tempdir().unwrap();
+    let (photo, video) = fixture_pair(dir.path());
+    let composed =
+        workspace::import(Default::default(), vec![photo.clone(), video.clone()]).unwrap();
+    let split = workspace::reverse(composed).unwrap();
+    let original_photo = split.photo.as_ref().unwrap().bytes.clone();
+    let original_video = split.video.as_ref().unwrap().bytes.clone();
+    let updated_photo =
+        workspace::import_into(split.clone(), vec![photo], workspace::DropTarget::Motion).unwrap();
+    assert!(!updated_photo.split);
+    assert_eq!(updated_photo.video.as_ref().unwrap().bytes, original_video);
+    assert_eq!(
+        updated_photo.photo.as_ref().unwrap().bytes.as_slice(),
+        PHOTO
+    );
+    let updated_video =
+        workspace::import_into(split, vec![video], workspace::DropTarget::Motion).unwrap();
+    assert!(!updated_video.split);
+    assert_eq!(updated_video.photo.as_ref().unwrap().bytes, original_photo);
+    assert_eq!(
+        updated_video.video.as_ref().unwrap().bytes.as_slice(),
+        VIDEO
+    );
+}
+
+#[test]
+fn motionphoto_drop_replaces_only_the_targeted_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let (photo, video) = fixture_pair(dir.path());
+    let baseline = workspace::import(Default::default(), vec![photo, video]).unwrap();
+    let mut changed_video = VIDEO.to_vec();
+    // A legal additional free box changes the container without changing playback.
+    changed_video.extend_from_slice(&[0, 0, 0, 8, b'f', b'r', b'e', b'e']);
+    let changed_photo = xmp(
+        PHOTO,
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:dc="http://purl.org/dc/elements/1.1/" dc:description="Alternate"/></r:RDF></x:xmpmeta>"#,
+    );
+    let incoming = dir.path().join("alternate.MP.jpg");
+    fs::write(
+        &incoming,
+        motion::compose(&changed_photo, &changed_video).unwrap(),
+    )
+    .unwrap();
+    let photo_only = workspace::import_into(
+        baseline.clone(),
+        vec![incoming.clone()],
+        workspace::DropTarget::Photo,
+    )
+    .unwrap();
+    assert!(!photo_only.split);
+    assert_eq!(
+        photo_only.video.as_ref().unwrap().bytes,
+        baseline.video.as_ref().unwrap().bytes
+    );
+    assert!(
+        String::from_utf8_lossy(&photo_only.photo.as_ref().unwrap().bytes).contains("Alternate")
+    );
+    let video_only = workspace::import_into(
+        baseline.clone(),
+        vec![incoming],
+        workspace::DropTarget::Video,
+    )
+    .unwrap();
+    assert_eq!(
+        video_only.photo.as_ref().unwrap().bytes,
+        baseline.photo.as_ref().unwrap().bytes
+    );
+    assert_eq!(
+        video_only.video.as_ref().unwrap().bytes.as_slice(),
+        changed_video
+    );
+}
+
+#[test]
+fn plain_media_type_takes_priority_over_the_drop_slot() {
+    let dir = tempfile::tempdir().unwrap();
+    let (photo, video) = fixture_pair(dir.path());
+    let first = workspace::import_into(
+        Default::default(),
+        vec![video],
+        workspace::DropTarget::Photo,
+    )
+    .unwrap();
+    assert!(first.video.is_some() && first.photo.is_none());
+    let second = workspace::import_into(first, vec![photo], workspace::DropTarget::Video).unwrap();
+    assert!(second.output.is_some());
+}
+
+#[test]
+fn source_dimensions_duration_and_thumbnails_are_available() {
+    let dir = tempfile::tempdir().unwrap();
+    let (photo, video) = fixture_pair(dir.path());
+    let session = workspace::import(Default::default(), vec![photo, video]).unwrap();
+    let photo = session.photo.as_ref().unwrap();
+    let info = photo.info.as_ref().unwrap();
+    assert_eq!((info.width, info.height), (320, 240));
+    assert!(info.duration.is_none());
+    let video = session.video.as_ref().unwrap();
+    let info = video.info.as_ref().unwrap();
+    assert_eq!((info.width, info.height), (320, 240));
+    assert!((info.duration.unwrap() - 1.0).abs() < 0.02);
+    assert!(photo.preview.as_ref().unwrap().is_file());
+    assert!(video.preview.as_ref().unwrap().is_file());
+}
+
+#[test]
+fn empty_flow_can_reverse_and_incomplete_flow_is_preserved() {
+    let empty = workspace::reverse(Default::default()).unwrap();
+    assert!(empty.split);
+    assert!(!workspace::reverse(empty).unwrap().split);
+    let dir = tempfile::tempdir().unwrap();
+    let (photo, _) = fixture_pair(dir.path());
+    let partial = workspace::import(Default::default(), vec![photo]).unwrap();
+    assert!(!partial.can_reverse());
+    assert!(workspace::reverse(partial.clone()).is_err());
+    assert!(partial.photo.as_ref().unwrap().path.exists());
+}
