@@ -1,0 +1,92 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    env:
+      CARGO_TERM_COLOR: always
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup show
+          rustup component add rustfmt clippy
+      - name: Verify release version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/check-release-version.py
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked
+      - name: Build application
+        run: ./scripts/bundle-macos.sh
+      - name: Package application
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: ./scripts/package-macos.sh
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: motiondrop-macos-${{ matrix.arch }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: motiondrop-macos-*
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--verify-tag --title "MotionDrop ${RELEASE_TAG#v}" --generate-notes)
+          if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.zip dist/*.sha256 --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/*.zip dist/*.sha256 "${args[@]}"
+          fi
