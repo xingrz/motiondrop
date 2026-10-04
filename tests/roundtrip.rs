@@ -312,3 +312,70 @@ fn empty_flow_can_reverse_and_incomplete_flow_is_preserved() {
     assert!(workspace::reverse(partial.clone()).is_err());
     assert!(partial.photo.as_ref().unwrap().path.exists());
 }
+
+#[test]
+fn jpeg_trailers_survive_composition_and_replacement() {
+    let mut photo = PHOTO.to_vec();
+    // Synthetic application trailer with binary data, unrelated to motion metadata.
+    let trailer: Vec<u8> = (0..24).map(|i| (i * 37) as u8).collect();
+    photo.extend_from_slice(&trailer);
+    assert!(motion::split(&photo).unwrap().is_none());
+    let dir = tempfile::tempdir().unwrap();
+    let photo_path = dir.path().join("trailer.jpg");
+    let video_path = dir.path().join("clip.mp4");
+    fs::write(&photo_path, &photo).unwrap();
+    fs::write(&video_path, VIDEO).unwrap();
+    let imported = workspace::import(Default::default(), vec![photo_path.clone()]).unwrap();
+    let composed = workspace::import(imported, vec![video_path.clone()]).unwrap();
+    let merged = &composed.output.as_ref().unwrap().bytes;
+    assert_eq!(composed.output.as_ref().unwrap().name, "trailer.MP.jpg");
+    let split = motion::split(merged).unwrap().unwrap();
+    assert!(split.photo.ends_with(&trailer));
+    assert_eq!(split.video, VIDEO);
+    assert_eq!(
+        image::load_from_memory(&split.photo).unwrap().to_rgb8(),
+        image::load_from_memory(PHOTO).unwrap().to_rgb8()
+    );
+    // Resolve the video from the modern directory without the legacy offset.
+    let xml_start = merged.windows(10).position(|w| w == b"<x:xmpmeta").unwrap();
+    let xml_end = merged
+        .windows(12)
+        .position(|w| w == b"</x:xmpmeta>")
+        .unwrap()
+        + 12;
+    let text = std::str::from_utf8(&merged[xml_start..xml_end]).unwrap();
+    let doc = roxmltree::Document::parse(text).unwrap();
+    let item_ns = "http://ns.google.com/photos/1.0/container/item/";
+    let primary = doc
+        .descendants()
+        .find(|n| n.attribute((item_ns, "Semantic")) == Some("Primary"))
+        .unwrap();
+    let padding: usize = primary
+        .attribute((item_ns, "Padding"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(padding, trailer.len());
+    let image_end = merged.windows(2).position(|w| w == [0xff, 0xd9]).unwrap() + 2;
+    assert_eq!(&merged[image_end + padding..], VIDEO);
+    let reversed = workspace::reverse(composed).unwrap();
+    let replaced =
+        workspace::import_into(reversed, vec![video_path], workspace::DropTarget::Motion).unwrap();
+    let parts = motion::split(&replaced.output.unwrap().bytes)
+        .unwrap()
+        .unwrap();
+    assert!(parts.photo.ends_with(&trailer));
+    assert_eq!(parts.video, VIDEO);
+    assert_eq!(fs::read(photo_path).unwrap(), photo);
+}
+
+#[test]
+fn composition_still_rejects_nested_motion_video() {
+    let motion = motion::compose(PHOTO, VIDEO).unwrap();
+    let error = motion::compose(&motion, VIDEO).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("already contains a motion video")
+    );
+}

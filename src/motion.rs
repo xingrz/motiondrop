@@ -268,16 +268,18 @@ pub fn compose(photo: &[u8], video: &[u8]) -> Result<Vec<u8>> {
         "This photo has an HDR gain map or multi-image index. Use a standard JPEG to compose a MotionPhoto."
     );
     ensure!(
-        photo.len() == jpeg.end,
-        "This photo contains appended data. Split it before composing a new MotionPhoto."
+        split(photo)?.is_none(),
+        "This photo already contains a motion video. Split it before composing a new MotionPhoto."
     );
+    // Preserve opaque JPEG trailers and account for them before the video item.
+    let padding = photo.len() - jpeg.end;
     let mime = video_mime(video)?;
     ensure!(
         jpeg.xmp.len() <= 1,
         "Multiple XMP packets are not supported for composition"
     );
     let description = format!(
-        r#"<rdf:Description rdf:about="" xmlns:rdf="{RDF}" xmlns:Camera="{CAMERA}" xmlns:Container="{CONTAINER}" xmlns:Item="{ITEM}" Camera:MotionPhoto="1" Camera:MotionPhotoVersion="1" Camera:MicroVideo="1" Camera:MicroVideoVersion="1" Camera:MicroVideoOffset="{}"><Container:Directory><rdf:Seq><rdf:li rdf:parseType="Resource"><Container:Item Item:Mime="image/jpeg" Item:Semantic="Primary" Item:Length="0" Item:Padding="0"/></rdf:li><rdf:li rdf:parseType="Resource"><Container:Item Item:Mime="{mime}" Item:Semantic="MotionPhoto" Item:Length="{}"/></rdf:li></rdf:Seq></Container:Directory></rdf:Description>"#,
+        r#"<rdf:Description rdf:about="" xmlns:rdf="{RDF}" xmlns:Camera="{CAMERA}" xmlns:Container="{CONTAINER}" xmlns:Item="{ITEM}" Camera:MotionPhoto="1" Camera:MotionPhotoVersion="1" Camera:MicroVideo="1" Camera:MicroVideoVersion="1" Camera:MicroVideoOffset="{}"><Container:Directory><rdf:Seq><rdf:li rdf:parseType="Resource"><Container:Item Item:Mime="image/jpeg" Item:Semantic="Primary" Item:Length="0" Item:Padding="{padding}"/></rdf:li><rdf:li rdf:parseType="Resource"><Container:Item Item:Mime="{mime}" Item:Semantic="MotionPhoto" Item:Length="{}"/></rdf:li></rdf:Seq></Container:Directory></rdf:Description>"#,
         video.len(),
         video.len()
     );
