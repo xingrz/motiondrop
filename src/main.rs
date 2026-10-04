@@ -16,6 +16,7 @@ const LINE: u32 = 0x272a2d;
 const MUTED: u32 = 0x858b90;
 const WHITE: u32 = 0xf3f4f5;
 const ACCENT: u32 = 0xc8e2cc;
+const WINDOW_DRAG_HEIGHT: f32 = 44.;
 actions!(motiondrop, [Quit, Choose, Reset, Replay, Reverse]);
 
 enum Work {
@@ -365,48 +366,6 @@ impl Render for MotionDrop {
             .overflow_hidden()
             .bg(rgb(0x000000))
             .when_some(media, |d, media| d.child(preview::media_canvas(media)))
-            .child(
-                div()
-                    .id("window-drag")
-                    .absolute()
-                    .top_0()
-                    .left(px(86.))
-                    .right_0()
-                    .h(px(44.))
-                    .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move()),
-            )
-            .when_some(self.error.clone(), |d, error| {
-                d.child(
-                    div()
-                        .absolute()
-                        .top_4()
-                        .left_4()
-                        .right_4()
-                        .px_4()
-                        .py_3()
-                        .rounded_lg()
-                        .bg(rgba(0x30201bee))
-                        .text_color(rgb(0xefbca4))
-                        .text_sm()
-                        .child(error),
-                )
-            })
-            .when(self.busy, |d| {
-                d.child(
-                    div()
-                        .absolute()
-                        .top_4()
-                        .left_4()
-                        .px_3()
-                        .py_2()
-                        .rounded_lg()
-                        .bg(rgb(PANEL))
-                        .text_color(rgb(MUTED))
-                        .text_sm()
-                        .child("Processing…"),
-                )
-            })
             .when(self.player.is_some(), |d| {
                 d.child(
                     div().absolute().bottom_5().right_5().child(
@@ -523,6 +482,48 @@ impl Render for MotionDrop {
                                 }))
                                 .child("Choose files  ↗"),
                         ),
+                )
+            })
+            .child(
+                div()
+                    .id("window-drag")
+                    .absolute()
+                    .top_0()
+                    .left(px(86.))
+                    .right_0()
+                    .h(px(WINDOW_DRAG_HEIGHT))
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move()),
+            )
+            .when_some(self.error.clone(), |d, error| {
+                d.child(
+                    div()
+                        .absolute()
+                        .top(px(WINDOW_DRAG_HEIGHT + 8.))
+                        .left_4()
+                        .right_4()
+                        .px_4()
+                        .py_3()
+                        .rounded_lg()
+                        .bg(rgba(0x30201bee))
+                        .text_color(rgb(0xefbca4))
+                        .text_sm()
+                        .child(error),
+                )
+            })
+            .when(self.busy, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .top(px(WINDOW_DRAG_HEIGHT + 8.))
+                        .left_4()
+                        .px_3()
+                        .py_2()
+                        .rounded_lg()
+                        .bg(rgb(PANEL))
+                        .text_color(rgb(MUTED))
+                        .text_sm()
+                        .child("Processing…"),
                 )
             });
         div()
