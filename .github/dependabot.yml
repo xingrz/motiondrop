@@ -8,3 +8,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Upgrade together with GPUI to keep CVPixelBuffer types compatible.
+      - dependency-name: core-video
+        versions: [">=0.6"]
