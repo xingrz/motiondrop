@@ -1,0 +1,31 @@
+[package]
+name = "motiondrop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+authors = ["XiNGRZ"]
+homepage = "https://xingrz.me"
+description = "A minimal GPUI desktop app for splitting and composing Google Motion Photos"
+
+[dependencies]
+anyhow = "1"
+roxmltree = "0.21"
+tempfile = "3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+gpui = { package = "gpui-pre", version = "=0.3.6" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.6", features = ["runtime_shaders", "font-kit"] }
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+strip = true
+lto = "thin"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-video = "0.5.2"
+core-foundation = "0.10"
+
+[build-dependencies]
+cc = "1"
