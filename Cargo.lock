@@ -1028,6 +1028,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-graphics2"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b65858d95344d2711161cd92196732f67d6c5fea238cf12f994584828731a5c"
+dependencies = [
+ "bitflags 2.13.2",
+ "block",
+ "cfg-if",
+ "core-foundation 0.10.1",
+ "libc",
+]
+
+[[package]]
 name = "core-text"
 version = "21.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1047,10 +1060,24 @@ checksum = "139679cc63eb9504bdbe37e37874b0247136177655f0008588781e90863afa62"
 dependencies = [
  "block",
  "core-foundation 0.10.1",
- "core-graphics2",
+ "core-graphics2 0.5.2",
  "io-surface",
  "libc",
  "metal",
+]
+
+[[package]]
+name = "core-video"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0f83d7bc2e8fbc517a71dcf3227003db7646e6c7aa5b0b5ab3acc89bc692641"
+dependencies = [
+ "block",
+ "core-foundation 0.10.1",
+ "core-graphics2 0.6.1",
+ "libc",
+ "objc2-core-foundation",
+ "objc2-io-surface",
 ]
 
 [[package]]
@@ -1903,7 +1930,7 @@ dependencies = [
  "bindgen",
  "bitflags 2.13.2",
  "chrono",
- "core-video",
+ "core-video 0.5.2",
  "ctor",
  "derive_more",
  "embed-resource",
@@ -1971,7 +1998,7 @@ dependencies = [
  "cbindgen",
  "cocoa 0.26.1",
  "core-foundation 0.10.1",
- "core-video",
+ "core-video 0.5.2",
  "derive_more",
  "etagere",
  "foreign-types",
@@ -3108,7 +3135,7 @@ dependencies = [
  "anyhow",
  "cc",
  "core-foundation 0.10.1",
- "core-video",
+ "core-video 0.6.1",
  "gpui-pre",
  "gpui-pre-platform",
  "image",

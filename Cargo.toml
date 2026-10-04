@@ -24,7 +24,7 @@ strip = true
 lto = "thin"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-video = "0.5.2"
+core-video = "0.6.1"
 core-foundation = "0.10"
 
 [build-dependencies]
